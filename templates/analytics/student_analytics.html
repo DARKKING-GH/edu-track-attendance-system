@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}My Analytics - EduTrack{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="dashboard-card">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h1 class="fw-bold mb-2">My Attendance Analytics</h1>
+                        <p class="text-muted mb-0">Track your attendance patterns and performance</p>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <select class="form-select" id="timeRangeSelect">
+                            <option value="7">Last 7 days</option>
+                            <option value="30" selected>Last 30 days</option>
+                            <option value="90">Last 90 days</option>
+                        </select>
+                        <button class="btn btn-primary" onclick="downloadReport()">
+                            <i class="fas fa-download me-2"></i>
+                            Download Report
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Analytics Cards -->
+    <div class="row mb-4">
+        <div class="col-lg-3 col-md-6 mb-3">
+            <div class="stat-card">
+                <h3 id="totalAttendance">-</h3>
+                <small>Total Attendance</small>
+                <div class="mt-2">
+                    <i class="fas fa-calendar-check fa-2x opacity-50"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-md-6 mb-3">
+            <div class="stat-card" style="background: linear-gradient(135deg, #198754, #146c43);">
+                <h3 id="attendanceRate">-</h3>
+                <small>Attendance Rate</small>
+                <div class="mt-2">
+                    <i class="fas fa-percentage fa-2x opacity-50"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-md-6 mb-3">
+            <div class="stat-card" style="background: linear-gradient(135deg, #ffc107, #e0a800);">
+                <h3 id="trendIndicator">-</h3>
+                <small>Trend</small>
+                <div class="mt-2">
+                    <i class="fas fa-chart-line fa-2x opacity-50"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-md-6 mb-3">
+            <div class="stat-card" style="background: linear-gradient(135deg, #0dcaf0, #0aa2c0);">
+                <h3 id="coursesEnrolled">-</h3>
+                <small>Courses Enrolled</small>
+                <div class="mt-2">
+                    <i class="fas fa-book fa-2x opacity-50"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="row">
+        <div class="col-lg-8 mb-4">
+            <div class="dashboard-card">
+                <h3 class="fw-bold mb-3">
+                    <i class="fas fa-chart-line text-primary me-2"></i>
+                    Weekly Attendance Trend
+                </h3>
+                <canvas id="weeklyTrendChart" height="100"></canvas>
+            </div>
+        </div>
+        
+        <div class="col-lg-4 mb-4">
+            <div class="dashboard-card">
+                <h3 class="fw-bold mb-3">
+                    <i class="fas fa-chart-pie text-primary me-2"></i>
+                    Course Distribution
+                </h3>
+                <canvas id="courseDistributionChart" height="200"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Course Performance -->
+    <div class="row">
+        <div class="col-12 mb-4">
+            <div class="dashboard-card">
+                <h3 class="fw-bold mb-3">
+                    <i class="fas fa-trophy text-primary me-2"></i>
+                    Course Performance
+                </h3>
+                <div id="coursePerformanceContainer">
+                    <!-- Course performance data will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/student-analytics.js') }}"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        initializeStudentAnalytics();
+    });
+</script>
+{% endblock %}
