@@ -90,7 +90,11 @@ export default function EduTrackHome() {
 
     try {
       console.log("[v0] Signup attempt:", signupForm.email, signupForm.role)
-      await signUp(signupForm.email, signupForm.password, signupForm.name, signupForm.role)
+
+      await Promise.race([
+        signUp(signupForm.email, signupForm.password, signupForm.name, signupForm.role),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Signup timeout")), 15000)),
+      ])
 
       if (signupForm.role === "lecturer") {
         setSuccess(
@@ -106,12 +110,18 @@ export default function EduTrackHome() {
       console.error("[v0] Signup error:", error)
       let errorMessage = "Account creation failed. Please try again."
 
-      if (error.message.includes("email-already-in-use")) {
+      if (error.message === "Signup timeout") {
+        errorMessage = "Account creation is taking too long. Please check your internet connection and try again."
+      } else if (error.message.includes("email-already-in-use")) {
         errorMessage = "An account with this email already exists. Please sign in instead."
       } else if (error.message.includes("weak-password")) {
         errorMessage = "Password is too weak. Please choose a stronger password."
       } else if (error.message.includes("invalid-email")) {
         errorMessage = "Please enter a valid email address."
+      } else if (error.message.includes("timeout")) {
+        errorMessage = "The process is taking longer than expected. Please try again or check your internet connection."
+      } else if (error.message.includes("Database write timeout")) {
+        errorMessage = "Account created but setup is incomplete. Please try signing in."
       }
 
       setError(errorMessage)

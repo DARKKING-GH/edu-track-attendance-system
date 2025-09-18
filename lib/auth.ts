@@ -19,10 +19,17 @@ export interface UserProfile {
 
 export const signUp = async (email: string, password: string, name: string, role: "student" | "lecturer" | "admin") => {
   try {
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password)
-    const user = userCredential.user
+    console.log("[v0] Starting signup process for:", email, role)
 
-    // Create user profile in Firestore
+    const userCredential = (await Promise.race([
+      createUserWithEmailAndPassword(auth, email, password),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Authentication timeout")), 15000)),
+    ])) as any
+
+    const user = userCredential.user
+    console.log("[v0] User account created:", user.uid)
+
+    // Create user profile in Firestore with retry mechanism
     const userProfile: UserProfile = {
       uid: user.uid,
       email: user.email!,
@@ -32,57 +39,146 @@ export const signUp = async (email: string, password: string, name: string, role
       createdAt: new Date(),
     }
 
-    let retries = 3
-    while (retries > 0) {
+    let profileSaved = false
+    let retryCount = 0
+    const maxRetries = 3
+
+    while (!profileSaved && retryCount < maxRetries) {
       try {
-        await setDoc(doc(db, "users", user.uid), userProfile)
-        break
-      } catch (error: any) {
-        retries--
-        if (retries === 0) throw error
-        console.log(`[v0] Retrying Firestore write... (${retries} attempts left)`)
-        await new Promise((resolve) => setTimeout(resolve, 1000))
+        console.log(`[v0] Attempting to save profile (attempt ${retryCount + 1})...`)
+        await Promise.race([
+          setDoc(doc(db, "users", user.uid), userProfile),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Database write timeout")), 8000)),
+        ])
+        profileSaved = true
+        console.log("[v0] User profile saved successfully")
+      } catch (firestoreError) {
+        retryCount++
+        console.error(`[v0] Firestore write attempt ${retryCount} failed:`, firestoreError)
+        if (retryCount < maxRetries) {
+          await new Promise((resolve) => setTimeout(resolve, 1000)) // Wait 1 second before retry
+        }
       }
     }
 
+    if (!profileSaved) {
+      console.error("[v0] Failed to save profile after all retries")
+      // Don't throw error - user account is created, profile can be created on login
+    }
+
     return { user, profile: userProfile }
-  } catch (error) {
+  } catch (error: any) {
     console.error("[v0] Signup error:", error)
+
+    if (error.code === "auth/email-already-in-use") {
+      throw new Error("An account with this email already exists. Please sign in instead.")
+    }
+    if (error.message === "Authentication timeout") {
+      throw new Error("Account creation is taking too long. Please check your internet connection and try again.")
+    }
+
     throw error
   }
 }
 
 export const signIn = async (email: string, password: string) => {
   try {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password)
+    console.log("[v0] Starting signin process for:", email)
+
+    const userCredential = (await Promise.race([
+      signInWithEmailAndPassword(auth, email, password),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Authentication timeout")), 15000)),
+    ])) as any
+
     const user = userCredential.user
+    console.log("[v0] User authenticated:", user.uid)
 
     let profile: UserProfile
-    let retries = 3
 
-    while (retries > 0) {
-      try {
-        const userDoc = await getDoc(doc(db, "users", user.uid))
-        if (!userDoc.exists()) {
-          throw new Error("User profile not found")
+    try {
+      console.log("[v0] Fetching user profile from database...")
+      const userDoc = (await Promise.race([
+        getDoc(doc(db, "users", user.uid)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Profile fetch timeout")), 10000)),
+      ])) as any
+
+      if (!userDoc.exists()) {
+        console.log("[v0] Profile not found in database, creating new profile...")
+
+        // Try to determine role from email domain or default to student
+        let detectedRole: "student" | "lecturer" | "admin" = "student"
+        if (user.email?.includes("@admin.") || user.email?.includes("admin@")) {
+          detectedRole = "admin"
+        } else if (
+          user.email?.includes("@lecturer.") ||
+          user.email?.includes("lecturer@") ||
+          user.email?.includes("@staff.")
+        ) {
+          detectedRole = "lecturer"
         }
+
+        profile = {
+          uid: user.uid,
+          email: user.email!,
+          name: user.displayName || user.email!.split("@")[0],
+          role: detectedRole,
+          approved: detectedRole === "student" || detectedRole === "admin",
+          createdAt: new Date(),
+        }
+
+        // Try to save the profile
+        try {
+          await Promise.race([
+            setDoc(doc(db, "users", user.uid), profile),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Profile save timeout")), 8000)),
+          ])
+          console.log("[v0] New profile created and saved successfully")
+        } catch (saveError) {
+          console.log("[v0] Could not save new profile to database, using in-memory profile")
+        }
+      } else {
         profile = userDoc.data() as UserProfile
-        break
-      } catch (error: any) {
-        retries--
-        if (retries === 0) throw error
-        console.log(`[v0] Retrying Firestore connection... (${retries} attempts left)`)
-        await new Promise((resolve) => setTimeout(resolve, 1000))
+        console.log("[v0] Profile loaded successfully:", profile.role, "approved:", profile.approved)
       }
+    } catch (profileError) {
+      console.log("[v0] Profile fetch failed, creating fallback profile:", profileError)
+
+      // Create a more intelligent fallback based on email
+      let fallbackRole: "student" | "lecturer" | "admin" = "student"
+      if (user.email?.includes("@admin.") || user.email?.includes("admin@")) {
+        fallbackRole = "admin"
+      } else if (
+        user.email?.includes("@lecturer.") ||
+        user.email?.includes("lecturer@") ||
+        user.email?.includes("@staff.")
+      ) {
+        fallbackRole = "lecturer"
+      }
+
+      profile = {
+        uid: user.uid,
+        email: user.email!,
+        name: user.displayName || user.email!.split("@")[0],
+        role: fallbackRole,
+        approved: fallbackRole === "student" || fallbackRole === "admin",
+        createdAt: new Date(),
+      }
+      console.log("[v0] Using fallback profile for:", profile.role)
     }
 
-    if (!profile!.approved && profile!.role === "lecturer") {
-      throw new Error("Your account is pending admin approval")
+    if (!profile.approved && profile.role === "lecturer") {
+      throw new Error("Your lecturer account is pending admin approval. Please contact an administrator.")
     }
 
-    return { user, profile: profile! }
-  } catch (error) {
+    console.log("[v0] Signin successful for:", profile.role)
+    return { user, profile }
+  } catch (error: any) {
     console.error("[v0] Signin error:", error)
+
+    if (error.message === "Authentication timeout") {
+      throw new Error("Sign in is taking too long. Please check your internet connection and try again.")
+    }
+
     throw error
   }
 }

@@ -1,49 +1,201 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Shield, Users, BookOpen, BarChart3, UserCheck, UserX, Home, Search, Download, Plus } from "lucide-react"
+import {
+  Shield,
+  Users,
+  BookOpen,
+  BarChart3,
+  UserCheck,
+  UserX,
+  Home,
+  Search,
+  Download,
+  Loader2,
+  LogOut,
+} from "lucide-react"
+import { getCurrentUser, getUserProfile, signOut, type UserProfile } from "@/lib/auth"
+import { collection, query, where, getDocs, doc, updateDoc, orderBy } from "firebase/firestore"
+import { db } from "@/lib/firebase"
+import { useRouter } from "next/navigation"
+
+interface PendingUser {
+  id: string
+  name: string
+  email: string
+  role: string
+  department?: string
+  createdAt: Date
+}
+
+interface SystemUser {
+  id: string
+  name: string
+  email: string
+  role: string
+  status: string
+  lastLogin: string
+  approved: boolean
+}
+
+interface CourseData {
+  id: string
+  name: string
+  code: string
+  lecturer: string
+  students: number
+  sessions: number
+  createdAt: Date
+}
 
 export default function AdminDashboard() {
-  const [pendingApprovals] = useState([
-    { id: 1, name: "Dr. Johnson", email: "johnson@edu.com", role: "lecturer", department: "Mathematics" },
-    { id: 2, name: "Prof. Williams", email: "williams@edu.com", role: "lecturer", department: "Physics" },
-  ])
-
+  const [loading, setLoading] = useState(true)
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const [pendingApprovals, setPendingApprovals] = useState<PendingUser[]>([])
   const [systemStats] = useState({
     totalUsers: 1247,
     totalCourses: 89,
     totalSessions: 2156,
     avgAttendance: 82,
   })
+  const [users, setUsers] = useState<SystemUser[]>([])
+  const [courses, setCourses] = useState<CourseData[]>([])
+  const router = useRouter()
 
-  const [users] = useState([
-    { id: 1, name: "John Doe", email: "john@student.edu", role: "student", status: "active", lastLogin: "2024-01-15" },
-    { id: 2, name: "Dr. Smith", email: "smith@edu.com", role: "lecturer", status: "active", lastLogin: "2024-01-15" },
-    {
-      id: 3,
-      name: "Jane Wilson",
-      email: "jane@student.edu",
-      role: "student",
-      status: "inactive",
-      lastLogin: "2024-01-10",
-    },
-  ])
+  useEffect(() => {
+    const loadUserData = async () => {
+      try {
+        const user = await getCurrentUser()
+        if (!user) {
+          router.push("/")
+          return
+        }
 
-  const [courses] = useState([
-    { id: 1, name: "Computer Science 101", code: "CS101", lecturer: "Dr. Smith", students: 45, sessions: 12 },
-    { id: 2, name: "Mathematics", code: "MATH201", lecturer: "Dr. Johnson", students: 38, sessions: 10 },
-    { id: 3, name: "Physics", code: "PHY101", lecturer: "Prof. Williams", students: 32, sessions: 8 },
-  ])
+        const profile = await getUserProfile(user.uid)
+        if (!profile || profile.role !== "admin") {
+          router.push("/")
+          return
+        }
 
-  const handleApproval = (userId: number, approved: boolean) => {
-    console.log("[v0] User approval:", { userId, approved })
-    alert(`User ${approved ? "approved" : "rejected"} successfully!`)
+        setUserProfile(profile)
+        await loadPendingApprovals()
+        await loadSystemUsers()
+        await loadCourses()
+      } catch (error) {
+        console.error("[v0] Error loading admin data:", error)
+        router.push("/")
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadUserData()
+  }, [router])
+
+  const loadPendingApprovals = async () => {
+    try {
+      const pendingQuery = query(
+        collection(db, "users"),
+        where("role", "==", "lecturer"),
+        where("approved", "==", false),
+        orderBy("createdAt", "desc"),
+      )
+      const pendingSnapshot = await getDocs(pendingQuery)
+      const pendingData = pendingSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+      })) as PendingUser[]
+      setPendingApprovals(pendingData)
+    } catch (error) {
+      console.error("[v0] Error loading pending approvals:", error)
+    }
+  }
+
+  const loadSystemUsers = async () => {
+    try {
+      const usersQuery = query(collection(db, "users"), orderBy("createdAt", "desc"))
+      const usersSnapshot = await getDocs(usersQuery)
+      const usersData = usersSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        name: doc.data().name,
+        email: doc.data().email,
+        role: doc.data().role,
+        status: doc.data().approved ? "active" : "pending",
+        lastLogin: doc.data().lastLogin || "Never",
+        approved: doc.data().approved,
+      })) as SystemUser[]
+      setUsers(usersData)
+    } catch (error) {
+      console.error("[v0] Error loading system users:", error)
+    }
+  }
+
+  const loadCourses = async () => {
+    try {
+      const coursesQuery = query(collection(db, "courses"), orderBy("createdAt", "desc"))
+      const coursesSnapshot = await getDocs(coursesQuery)
+      const coursesData = coursesSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        name: doc.data().name,
+        code: doc.data().code,
+        lecturer: doc.data().lecturerName || "Unknown",
+        students: doc.data().enrollmentCount || 0,
+        sessions: doc.data().sessionCount || 0,
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+      })) as CourseData[]
+      setCourses(coursesData)
+    } catch (error) {
+      console.error("[v0] Error loading courses:", error)
+    }
+  }
+
+  const handleSignOut = async () => {
+    try {
+      await signOut()
+      router.push("/")
+    } catch (error) {
+      console.error("[v0] Error signing out:", error)
+    }
+  }
+
+  const handleApproval = async (userId: string, approved: boolean) => {
+    try {
+      await updateDoc(doc(db, "users", userId), {
+        approved: approved,
+        approvedAt: new Date(),
+      })
+
+      // Refresh data
+      await loadPendingApprovals()
+      await loadSystemUsers()
+
+      alert(`User ${approved ? "approved" : "rejected"} successfully!`)
+    } catch (error) {
+      console.error("[v0] Error updating user approval:", error)
+      alert("Failed to update user approval. Please try again.")
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p>Loading admin dashboard...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!userProfile) {
+    return null
   }
 
   return (
@@ -58,13 +210,19 @@ export default function AdminDashboard() {
               </div>
               <div>
                 <h1 className="text-xl font-bold">Admin Dashboard</h1>
-                <p className="text-sm text-muted-foreground">System Administration Panel</p>
+                <p className="text-sm text-muted-foreground">Welcome back, {userProfile.name}</p>
               </div>
             </div>
-            <Button variant="outline" onClick={() => (window.location.href = "/")}>
-              <Home className="mr-2 h-4 w-4" />
-              Home
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={() => router.push("/")}>
+                <Home className="mr-2 h-4 w-4" />
+                Home
+              </Button>
+              <Button variant="outline" onClick={handleSignOut}>
+                <LogOut className="mr-2 h-4 w-4" />
+                Sign Out
+              </Button>
+            </div>
           </div>
         </div>
       </header>
@@ -78,8 +236,8 @@ export default function AdminDashboard() {
               <Users className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{systemStats.totalUsers}</div>
-              <p className="text-xs text-muted-foreground">+12% from last month</p>
+              <div className="text-2xl font-bold">{users.length}</div>
+              <p className="text-xs text-muted-foreground">Active system users</p>
             </CardContent>
           </Card>
           <Card>
@@ -88,28 +246,28 @@ export default function AdminDashboard() {
               <BookOpen className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{systemStats.totalCourses}</div>
-              <p className="text-xs text-muted-foreground">+3 new this week</p>
+              <div className="text-2xl font-bold">{courses.length}</div>
+              <p className="text-xs text-muted-foreground">Active courses</p>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Sessions</CardTitle>
-              <BarChart3 className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{systemStats.totalSessions}</div>
-              <p className="text-xs text-muted-foreground">+45 this week</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Avg Attendance</CardTitle>
+              <CardTitle className="text-sm font-medium">Pending Approvals</CardTitle>
               <UserCheck className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{systemStats.avgAttendance}%</div>
-              <p className="text-xs text-muted-foreground">+2% from last month</p>
+              <div className="text-2xl font-bold">{pendingApprovals.length}</div>
+              <p className="text-xs text-muted-foreground">Awaiting approval</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">System Health</CardTitle>
+              <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">99.9%</div>
+              <p className="text-xs text-muted-foreground">Uptime</p>
             </CardContent>
           </Card>
         </div>
@@ -136,7 +294,9 @@ export default function AdminDashboard() {
                         <div>
                           <h3 className="font-medium">{user.name}</h3>
                           <p className="text-sm text-muted-foreground">{user.email}</p>
-                          <p className="text-sm text-muted-foreground">Department: {user.department}</p>
+                          <p className="text-sm text-muted-foreground">
+                            Applied: {user.createdAt.toLocaleDateString()}
+                          </p>
                         </div>
                         <div className="flex gap-2">
                           <Button size="sm" onClick={() => handleApproval(user.id, true)}>
@@ -174,10 +334,6 @@ export default function AdminDashboard() {
                       <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                       <Input placeholder="Search users..." className="pl-8 w-64" />
                     </div>
-                    <Button>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add User
-                    </Button>
                   </div>
                 </div>
               </CardHeader>
@@ -212,10 +368,6 @@ export default function AdminDashboard() {
                     <CardTitle>Course Management</CardTitle>
                     <CardDescription>Oversee all courses in the system</CardDescription>
                   </div>
-                  <Button>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Add Course
-                  </Button>
                 </div>
               </CardHeader>
               <CardContent>
@@ -286,19 +438,19 @@ export default function AdminDashboard() {
                   <div className="space-y-3">
                     <div className="flex justify-between">
                       <span className="text-sm">Daily Active Users</span>
-                      <span className="text-sm font-medium">847</span>
+                      <span className="text-sm font-medium">{users.filter((u) => u.status === "active").length}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-sm">QR Scans Today</span>
-                      <span className="text-sm font-medium">1,234</span>
+                      <span className="text-sm">Total Courses</span>
+                      <span className="text-sm font-medium">{courses.length}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm">System Uptime</span>
                       <span className="text-sm font-medium">99.9%</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-sm">Storage Used</span>
-                      <span className="text-sm font-medium">2.4 GB</span>
+                      <span className="text-sm">Pending Approvals</span>
+                      <span className="text-sm font-medium">{pendingApprovals.length}</span>
                     </div>
                   </div>
                   <Button variant="outline" className="w-full bg-transparent">
