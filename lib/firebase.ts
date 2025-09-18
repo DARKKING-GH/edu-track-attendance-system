@@ -1,11 +1,9 @@
-// Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app"
 import { getAuth } from "firebase/auth"
-import { getFirestore } from "firebase/firestore"
+import { getFirestore, enableNetwork } from "firebase/firestore"
 import { getStorage } from "firebase/storage"
 import { getAnalytics } from "firebase/analytics"
 
-// Your web app's Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyBAoOtc4N0iJ4gdZdpObXjB7YhV02Ale74",
   authDomain: "smart-attend-2d532.firebaseapp.com",
@@ -23,6 +21,13 @@ const app = initializeApp(firebaseConfig)
 export const auth = getAuth(app)
 export const db = getFirestore(app)
 export const storage = getStorage(app)
+
+if (typeof window !== "undefined") {
+  // Ensure Firestore is online
+  enableNetwork(db).catch((error) => {
+    console.warn("Failed to enable Firestore network:", error)
+  })
+}
 
 // Initialize Analytics (only in browser)
 export const analytics = typeof window !== "undefined" ? getAnalytics(app) : null

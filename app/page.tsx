@@ -22,34 +22,54 @@ export default function EduTrackHome() {
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
   const router = useRouter()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError("")
+    setSuccess("")
 
     try {
       console.log("[v0] Login attempt:", loginForm.email)
       const { profile } = await signIn(loginForm.email, loginForm.password)
 
+      setSuccess("Login successful! Redirecting...")
+
       // Redirect based on role
-      switch (profile.role) {
-        case "admin":
-          router.push("/admin")
-          break
-        case "lecturer":
-          router.push("/lecturer")
-          break
-        case "student":
-          router.push("/student")
-          break
-        default:
-          router.push("/student")
-      }
+      setTimeout(() => {
+        switch (profile.role) {
+          case "admin":
+            router.push("/admin")
+            break
+          case "lecturer":
+            router.push("/lecturer")
+            break
+          case "student":
+            router.push("/student")
+            break
+          default:
+            router.push("/student")
+        }
+      }, 1000)
     } catch (error: any) {
       console.error("[v0] Login error:", error)
-      setError(error.message || "Login failed. Please try again.")
+      let errorMessage = "Login failed. Please try again."
+
+      if (error.message.includes("invalid-credential")) {
+        errorMessage = "Invalid email or password. Please check your credentials and try again."
+      } else if (error.message.includes("user-not-found")) {
+        errorMessage = "No account found with this email address. Please sign up first."
+      } else if (error.message.includes("wrong-password")) {
+        errorMessage = "Incorrect password. Please try again."
+      } else if (error.message.includes("too-many-requests")) {
+        errorMessage = "Too many failed attempts. Please try again later."
+      } else if (error.message.includes("network-request-failed")) {
+        errorMessage = "Network error. Please check your internet connection."
+      }
+
+      setError(errorMessage)
     } finally {
       setLoading(false)
     }
@@ -59,22 +79,42 @@ export default function EduTrackHome() {
     e.preventDefault()
     setLoading(true)
     setError("")
+    setSuccess("")
+
+    // Basic validation
+    if (signupForm.password.length < 6) {
+      setError("Password must be at least 6 characters long.")
+      setLoading(false)
+      return
+    }
 
     try {
       console.log("[v0] Signup attempt:", signupForm.email, signupForm.role)
       await signUp(signupForm.email, signupForm.password, signupForm.name, signupForm.role)
 
       if (signupForm.role === "lecturer") {
-        alert("Account created successfully! Your account is pending admin approval.")
+        setSuccess(
+          "Account created successfully! Your lecturer account is pending admin approval. You'll be notified once approved.",
+        )
       } else {
-        alert("Account created successfully! You can now sign in.")
+        setSuccess("Account created successfully! You can now sign in with your credentials.")
       }
 
       // Reset form
       setSignupForm({ name: "", email: "", password: "", role: "student" })
     } catch (error: any) {
       console.error("[v0] Signup error:", error)
-      setError(error.message || "Signup failed. Please try again.")
+      let errorMessage = "Account creation failed. Please try again."
+
+      if (error.message.includes("email-already-in-use")) {
+        errorMessage = "An account with this email already exists. Please sign in instead."
+      } else if (error.message.includes("weak-password")) {
+        errorMessage = "Password is too weak. Please choose a stronger password."
+      } else if (error.message.includes("invalid-email")) {
+        errorMessage = "Please enter a valid email address."
+      }
+
+      setError(errorMessage)
     } finally {
       setLoading(false)
     }
@@ -190,6 +230,12 @@ export default function EduTrackHome() {
                   </div>
                 )}
 
+                {success && (
+                  <div className="mb-4 p-3 text-sm text-green-600 bg-green-50 border border-green-200 rounded-md">
+                    {success}
+                  </div>
+                )}
+
                 <Tabs defaultValue="login" className="w-full">
                   <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="login">Sign In</TabsTrigger>
@@ -231,13 +277,6 @@ export default function EduTrackHome() {
                         {loading ? "Signing In..." : "Sign In"}
                       </Button>
                     </form>
-
-                    <div className="text-center text-sm text-muted-foreground">
-                      <p>Demo accounts:</p>
-                      <p>Student: student@edu.com</p>
-                      <p>Lecturer: lecturer@edu.com</p>
-                      <p>Admin: admin@edu.com</p>
-                    </div>
                   </TabsContent>
 
                   <TabsContent value="signup" className="space-y-4">
@@ -271,11 +310,12 @@ export default function EduTrackHome() {
                         <Input
                           id="signup-password"
                           type="password"
-                          placeholder="Create a password"
+                          placeholder="Create a password (min. 6 characters)"
                           value={signupForm.password}
                           onChange={(e) => setSignupForm((prev) => ({ ...prev, password: e.target.value }))}
                           required
                           disabled={loading}
+                          minLength={6}
                         />
                       </div>
                       <div className="space-y-2">
@@ -306,6 +346,19 @@ export default function EduTrackHome() {
                         {loading ? "Creating Account..." : "Create Account"}
                       </Button>
                     </form>
+
+                    <div className="text-center text-sm text-muted-foreground mt-4 p-3 bg-muted/50 rounded-md">
+                      <p className="font-medium mb-1">Account Types:</p>
+                      <p>
+                        <strong>Student:</strong> Scan QR codes to mark attendance
+                      </p>
+                      <p>
+                        <strong>Lecturer:</strong> Generate QR codes and manage courses (requires admin approval)
+                      </p>
+                      <p>
+                        <strong>Admin:</strong> Full system management and user approval
+                      </p>
+                    </div>
                   </TabsContent>
                 </Tabs>
               </CardContent>

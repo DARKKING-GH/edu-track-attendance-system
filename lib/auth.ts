@@ -28,11 +28,22 @@ export const signUp = async (email: string, password: string, name: string, role
       email: user.email!,
       name,
       role,
-      approved: role === "student", // Students are auto-approved, lecturers need admin approval
+      approved: role === "student" || role === "admin", // Students and admins are auto-approved
       createdAt: new Date(),
     }
 
-    await setDoc(doc(db, "users", user.uid), userProfile)
+    let retries = 3
+    while (retries > 0) {
+      try {
+        await setDoc(doc(db, "users", user.uid), userProfile)
+        break
+      } catch (error: any) {
+        retries--
+        if (retries === 0) throw error
+        console.log(`[v0] Retrying Firestore write... (${retries} attempts left)`)
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+      }
+    }
 
     return { user, profile: userProfile }
   } catch (error) {
@@ -46,19 +57,30 @@ export const signIn = async (email: string, password: string) => {
     const userCredential = await signInWithEmailAndPassword(auth, email, password)
     const user = userCredential.user
 
-    // Get user profile from Firestore
-    const userDoc = await getDoc(doc(db, "users", user.uid))
-    if (!userDoc.exists()) {
-      throw new Error("User profile not found")
+    let profile: UserProfile
+    let retries = 3
+
+    while (retries > 0) {
+      try {
+        const userDoc = await getDoc(doc(db, "users", user.uid))
+        if (!userDoc.exists()) {
+          throw new Error("User profile not found")
+        }
+        profile = userDoc.data() as UserProfile
+        break
+      } catch (error: any) {
+        retries--
+        if (retries === 0) throw error
+        console.log(`[v0] Retrying Firestore connection... (${retries} attempts left)`)
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+      }
     }
 
-    const profile = userDoc.data() as UserProfile
-
-    if (!profile.approved && profile.role === "lecturer") {
+    if (!profile!.approved && profile!.role === "lecturer") {
       throw new Error("Your account is pending admin approval")
     }
 
-    return { user, profile }
+    return { user, profile: profile! }
   } catch (error) {
     console.error("[v0] Signin error:", error)
     throw error

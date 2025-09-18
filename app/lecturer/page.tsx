@@ -2,71 +2,222 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { QrCode, Users, BookOpen, Clock, Home, Plus, Eye, Download } from "lucide-react"
+import { QrCode, Users, BookOpen, Clock, Home, Plus, Download, Upload, Loader2, LogOut } from "lucide-react"
+import { getCurrentUser, getUserProfile, signOut, type UserProfile } from "@/lib/auth"
+import { collection, query, where, getDocs, addDoc, orderBy } from "firebase/firestore"
+import { db } from "@/lib/firebase"
+import { useRouter } from "next/navigation"
+import { FileUpload } from "@/components/file-upload"
+
+interface Course {
+  id: string
+  name: string
+  code: string
+  description: string
+  lecturerId: string
+  createdAt: Date
+  materials?: CourseMaterial[]
+}
+
+interface CourseMaterial {
+  id: string
+  courseId: string
+  name: string
+  url: string
+  type: string
+  uploadedAt: Date
+}
+
+interface AttendanceRecord {
+  id: string
+  studentId: string
+  courseId: string
+  courseName: string
+  courseCode: string
+  date: Date
+  status: "present" | "absent"
+  markedAt: Date
+}
 
 export default function LecturerDashboard() {
   const [activeQR, setActiveQR] = useState<string | null>(null)
   const [sessionDuration, setSessionDuration] = useState(15)
   const [newCourse, setNewCourse] = useState({ name: "", code: "", description: "" })
+  const [loading, setLoading] = useState(true)
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const [courses, setCourses] = useState<Course[]>([])
+  const [liveAttendance, setLiveAttendance] = useState<AttendanceRecord[]>([])
+  const [selectedCourse, setSelectedCourse] = useState<string>("")
+  const [showMaterialUpload, setShowMaterialUpload] = useState<string | null>(null)
+  const router = useRouter()
 
-  const [courses] = useState([
-    {
-      id: 1,
-      name: "Computer Science 101",
-      code: "CS101",
-      students: 45,
-      sessions: 12,
-      avgAttendance: 85,
-    },
-    {
-      id: 2,
-      name: "Data Structures",
-      code: "CS201",
-      students: 38,
-      sessions: 10,
-      avgAttendance: 78,
-    },
-    {
-      id: 3,
-      name: "Algorithms",
-      code: "CS301",
-      students: 32,
-      sessions: 8,
-      avgAttendance: 92,
-    },
-  ])
+  useEffect(() => {
+    const loadUserData = async () => {
+      try {
+        const user = await getCurrentUser()
+        if (!user) {
+          router.push("/")
+          return
+        }
 
-  const [liveAttendance] = useState([
-    { studentId: "STU001", name: "John Doe", time: "2:01 PM", status: "present" },
-    { studentId: "STU002", name: "Jane Smith", time: "2:02 PM", status: "present" },
-    { studentId: "STU003", name: "Mike Johnson", time: "2:03 PM", status: "present" },
-  ])
+        const profile = await getUserProfile(user.uid)
+        if (!profile || profile.role !== "lecturer") {
+          router.push("/")
+          return
+        }
 
-  const generateQR = (courseCode: string) => {
-    const sessionId = `${courseCode}-${Date.now()}`
+        setUserProfile(profile)
+        await loadCourses(user.uid)
+      } catch (error) {
+        console.error("[v0] Error loading user data:", error)
+        router.push("/")
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadUserData()
+  }, [router])
+
+  const loadCourses = async (lecturerId: string) => {
+    try {
+      const coursesQuery = query(
+        collection(db, "courses"),
+        where("lecturerId", "==", lecturerId),
+        orderBy("createdAt", "desc"),
+      )
+      const coursesSnapshot = await getDocs(coursesQuery)
+      const coursesData = coursesSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+      })) as Course[]
+      setCourses(coursesData)
+    } catch (error) {
+      console.error("[v0] Error loading courses:", error)
+    }
+  }
+
+  const loadLiveAttendance = async (courseId: string) => {
+    try {
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+
+      const attendanceQuery = query(
+        collection(db, "attendance"),
+        where("courseId", "==", courseId),
+        where("date", ">=", today),
+        orderBy("markedAt", "desc"),
+      )
+      const attendanceSnapshot = await getDocs(attendanceQuery)
+      const attendanceData = attendanceSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        date: doc.data().date?.toDate() || new Date(),
+        markedAt: doc.data().markedAt?.toDate() || new Date(),
+      })) as AttendanceRecord[]
+
+      setLiveAttendance(attendanceData)
+    } catch (error) {
+      console.error("[v0] Error loading live attendance:", error)
+    }
+  }
+
+  const handleSignOut = async () => {
+    try {
+      await signOut()
+      router.push("/")
+    } catch (error) {
+      console.error("[v0] Error signing out:", error)
+    }
+  }
+
+  const generateQR = async (courseCode: string) => {
+    const course = courses.find((c) => c.code === courseCode)
+    if (!course) return
+
+    const sessionId = `${course.id}-session-${Date.now()}`
     setActiveQR(sessionId)
+    setSelectedCourse(course.id)
+
+    // Load live attendance for this course
+    await loadLiveAttendance(course.id)
 
     // Auto-expire QR code after session duration
     setTimeout(
       () => {
         setActiveQR(null)
+        setSelectedCourse("")
+        setLiveAttendance([])
       },
       sessionDuration * 60 * 1000,
     )
   }
 
-  const handleCreateCourse = (e: React.FormEvent) => {
+  const handleCreateCourse = async (e: React.FormEvent) => {
     e.preventDefault()
-    console.log("[v0] Creating course:", newCourse)
-    alert("Course created successfully!")
-    setNewCourse({ name: "", code: "", description: "" })
+    if (!userProfile) return
+
+    try {
+      const courseData = {
+        ...newCourse,
+        lecturerId: userProfile.uid,
+        createdAt: new Date(),
+        materials: [],
+      }
+
+      await addDoc(collection(db, "courses"), courseData)
+      await loadCourses(userProfile.uid)
+
+      alert("Course created successfully!")
+      setNewCourse({ name: "", code: "", description: "" })
+    } catch (error) {
+      console.error("[v0] Error creating course:", error)
+      alert("Failed to create course. Please try again.")
+    }
+  }
+
+  const handleMaterialUpload = async (url: string, filename: string, courseId: string) => {
+    try {
+      const materialData = {
+        courseId,
+        name: filename,
+        url,
+        type: filename.split(".").pop() || "unknown",
+        uploadedAt: new Date(),
+        uploadedBy: userProfile?.uid,
+      }
+
+      await addDoc(collection(db, "course_materials"), materialData)
+
+      alert("Course material uploaded successfully!")
+      setShowMaterialUpload(null)
+    } catch (error) {
+      console.error("[v0] Error uploading material:", error)
+      alert("Failed to upload material. Please try again.")
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p>Loading dashboard...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!userProfile) {
+    return null
   }
 
   return (
@@ -81,13 +232,19 @@ export default function LecturerDashboard() {
               </div>
               <div>
                 <h1 className="text-xl font-bold">Lecturer Dashboard</h1>
-                <p className="text-sm text-muted-foreground">Welcome back, Dr. Smith</p>
+                <p className="text-sm text-muted-foreground">Welcome back, {userProfile.name}</p>
               </div>
             </div>
-            <Button variant="outline" onClick={() => (window.location.href = "/")}>
-              <Home className="mr-2 h-4 w-4" />
-              Home
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={() => router.push("/")}>
+                <Home className="mr-2 h-4 w-4" />
+                Home
+              </Button>
+              <Button variant="outline" onClick={handleSignOut}>
+                <LogOut className="mr-2 h-4 w-4" />
+                Sign Out
+              </Button>
+            </div>
           </div>
         </div>
       </header>
@@ -103,43 +260,62 @@ export default function LecturerDashboard() {
 
           <TabsContent value="courses" className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {courses.map((course) => (
-                <Card key={course.id}>
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <CardTitle className="text-lg">{course.name}</CardTitle>
-                        <CardDescription>{course.code}</CardDescription>
-                      </div>
-                      <Badge variant={course.avgAttendance >= 80 ? "default" : "secondary"}>
-                        {course.avgAttendance}%
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">Students:</span>
-                        <span className="font-medium">{course.students}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">Sessions:</span>
-                        <span className="font-medium">{course.sessions}</span>
-                      </div>
-                      <div className="flex gap-2 mt-4">
-                        <Button size="sm" variant="outline" className="flex-1 bg-transparent">
-                          <Eye className="mr-1 h-3 w-3" />
-                          View
-                        </Button>
-                        <Button size="sm" className="flex-1" onClick={() => generateQR(course.code)}>
-                          <QrCode className="mr-1 h-3 w-3" />
-                          QR
-                        </Button>
-                      </div>
-                    </div>
+              {courses.length === 0 ? (
+                <Card className="col-span-full">
+                  <CardContent className="text-center py-8">
+                    <BookOpen className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                    <p className="text-muted-foreground">No courses created yet.</p>
+                    <p className="text-sm text-muted-foreground mt-2">Create your first course to get started.</p>
                   </CardContent>
                 </Card>
-              ))}
+              ) : (
+                courses.map((course) => (
+                  <Card key={course.id}>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle className="text-lg">{course.name}</CardTitle>
+                          <CardDescription>{course.code}</CardDescription>
+                        </div>
+                        <Badge variant="outline">Active</Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        <p className="text-sm text-muted-foreground line-clamp-2">{course.description}</p>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="flex-1 bg-transparent"
+                            onClick={() => setShowMaterialUpload(showMaterialUpload === course.id ? null : course.id)}
+                          >
+                            <Upload className="mr-1 h-3 w-3" />
+                            Materials
+                          </Button>
+                          <Button size="sm" className="flex-1" onClick={() => generateQR(course.code)}>
+                            <QrCode className="mr-1 h-3 w-3" />
+                            QR
+                          </Button>
+                        </div>
+
+                        {showMaterialUpload === course.id && (
+                          <div className="mt-4 p-3 border rounded-lg bg-muted/50">
+                            <h4 className="font-medium mb-3 text-sm">Upload Course Material</h4>
+                            <FileUpload
+                              type="course-material"
+                              accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.zip"
+                              maxSize={10}
+                              onUpload={(url, filename) => handleMaterialUpload(url, filename, course.id)}
+                              className="max-w-full"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
             </div>
           </TabsContent>
 
@@ -156,7 +332,10 @@ export default function LecturerDashboard() {
                     <select
                       id="course-select"
                       className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      value={selectedCourse}
+                      onChange={(e) => setSelectedCourse(e.target.value)}
                     >
+                      <option value="">Select a course...</option>
                       {courses.map((course) => (
                         <option key={course.id} value={course.code}>
                           {course.name} ({course.code})
@@ -175,7 +354,14 @@ export default function LecturerDashboard() {
                       max="180"
                     />
                   </div>
-                  <Button onClick={() => generateQR("CS101")} className="w-full" disabled={!!activeQR}>
+                  <Button
+                    onClick={() => {
+                      const course = courses.find((c) => c.code === selectedCourse)
+                      if (course) generateQR(course.code)
+                    }}
+                    className="w-full"
+                    disabled={!!activeQR || !selectedCourse}
+                  >
                     {activeQR ? "Session Active" : "Generate QR Code"}
                   </Button>
                 </CardContent>
@@ -191,7 +377,7 @@ export default function LecturerDashboard() {
                     {activeQR ? (
                       <div className="text-center">
                         <QrCode className="h-32 w-32 mx-auto mb-4 text-primary" />
-                        <p className="text-sm font-medium">Session: {activeQR}</p>
+                        <p className="text-sm font-medium">Session: {activeQR.split("-")[1]}</p>
                         <p className="text-xs text-muted-foreground">Expires in {sessionDuration} minutes</p>
                       </div>
                     ) : (
@@ -214,35 +400,50 @@ export default function LecturerDashboard() {
                     <CardTitle>Live Attendance Tracking</CardTitle>
                     <CardDescription>Real-time attendance for active sessions</CardDescription>
                   </div>
-                  <Badge variant="outline" className="flex items-center gap-1">
-                    <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />
-                    Live
-                  </Badge>
+                  {activeQR && (
+                    <Badge variant="outline" className="flex items-center gap-1">
+                      <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />
+                      Live
+                    </Badge>
+                  )}
                 </div>
               </CardHeader>
               <CardContent>
-                {activeQR ? (
+                {activeQR && selectedCourse ? (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <h3 className="font-medium">CS101 - Current Session</h3>
+                      <h3 className="font-medium">
+                        {courses.find((c) => c.id === selectedCourse)?.name} - Current Session
+                      </h3>
                       <div className="flex items-center gap-2">
                         <Users className="h-4 w-4" />
                         <span className="text-sm">{liveAttendance.length} present</span>
                       </div>
                     </div>
                     <div className="space-y-2">
-                      {liveAttendance.map((student, index) => (
-                        <div key={index} className="flex items-center justify-between p-3 rounded-lg border">
-                          <div>
-                            <p className="font-medium">{student.name}</p>
-                            <p className="text-sm text-muted-foreground">{student.studentId}</p>
-                          </div>
-                          <div className="text-right">
-                            <Badge variant="default">Present</Badge>
-                            <p className="text-sm text-muted-foreground mt-1">{student.time}</p>
-                          </div>
+                      {liveAttendance.length === 0 ? (
+                        <div className="text-center py-8">
+                          <p className="text-muted-foreground">No students have marked attendance yet.</p>
+                          <p className="text-sm text-muted-foreground mt-2">
+                            Students will appear here as they scan the QR code.
+                          </p>
                         </div>
-                      ))}
+                      ) : (
+                        liveAttendance.map((record) => (
+                          <div key={record.id} className="flex items-center justify-between p-3 rounded-lg border">
+                            <div>
+                              <p className="font-medium">Student {record.studentId.slice(-8)}</p>
+                              <p className="text-sm text-muted-foreground">{record.studentId}</p>
+                            </div>
+                            <div className="text-right">
+                              <Badge variant="default">Present</Badge>
+                              <p className="text-sm text-muted-foreground mt-1">
+                                {record.markedAt.toLocaleTimeString()}
+                              </p>
+                            </div>
+                          </div>
+                        ))
+                      )}
                     </div>
                     <Button variant="outline" className="w-full bg-transparent">
                       <Download className="mr-2 h-4 w-4" />
