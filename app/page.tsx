@@ -55,21 +55,8 @@ export default function EduTrackHome() {
       }, 1000)
     } catch (error: any) {
       console.error("[v0] Login error:", error)
-      let errorMessage = "Login failed. Please try again."
 
-      if (error.message.includes("invalid-credential")) {
-        errorMessage = "Invalid email or password. Please check your credentials and try again."
-      } else if (error.message.includes("user-not-found")) {
-        errorMessage = "No account found with this email address. Please sign up first."
-      } else if (error.message.includes("wrong-password")) {
-        errorMessage = "Incorrect password. Please try again."
-      } else if (error.message.includes("too-many-requests")) {
-        errorMessage = "Too many failed attempts. Please try again later."
-      } else if (error.message.includes("network-request-failed")) {
-        errorMessage = "Network error. Please check your internet connection."
-      }
-
-      setError(errorMessage)
+      setError(error.message || "Login failed. Please try again.")
     } finally {
       setLoading(false)
     }
@@ -96,16 +83,36 @@ export default function EduTrackHome() {
         new Promise((_, reject) => setTimeout(() => reject(new Error("Signup timeout")), 15000)),
       ])
 
-      if (signupForm.role === "lecturer") {
+      console.log("[v0] Account created, signing in user...")
+      const { profile } = await signIn(signupForm.email, signupForm.password)
+
+      if (signupForm.role === "lecturer" && !profile.approved) {
         setSuccess(
           "Account created successfully! Your lecturer account is pending admin approval. You'll be notified once approved.",
         )
+        // Reset form but don't redirect for unapproved lecturers
+        setSignupForm({ name: "", email: "", password: "", role: "student" })
       } else {
-        setSuccess("Account created successfully! You can now sign in with your credentials.")
-      }
+        setSuccess("Account created successfully! Redirecting to your dashboard...")
 
-      // Reset form
-      setSignupForm({ name: "", email: "", password: "", role: "student" })
+        setSignupForm({ name: "", email: "", password: "", role: "student" })
+
+        setTimeout(() => {
+          switch (profile.role) {
+            case "admin":
+              router.push("/admin")
+              break
+            case "lecturer":
+              router.push("/lecturer")
+              break
+            case "student":
+              router.push("/student")
+              break
+            default:
+              router.push("/student")
+          }
+        }, 1500)
+      }
     } catch (error: any) {
       console.error("[v0] Signup error:", error)
       let errorMessage = "Account creation failed. Please try again."
@@ -131,125 +138,136 @@ export default function EduTrackHome() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-muted/20 to-background">
-      {/* Header */}
-      <header className="border-b bg-card/50 backdrop-blur-sm">
-        <div className="container mx-auto px-4 py-4">
+    <div className="min-h-screen bg-gradient-to-br from-background via-card/30 to-background">
+      <header className="border-b bg-card/80 backdrop-blur-md shadow-sm">
+        <div className="container mx-auto px-4 py-6">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <QrCode className="h-6 w-6" />
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/80 text-primary-foreground shadow-lg">
+                <QrCode className="h-7 w-7" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-foreground">EduTrack</h1>
-                <p className="text-sm text-muted-foreground">Smart Attendance System</p>
+                <h1 className="text-3xl font-bold text-foreground tracking-tight">EduTrack</h1>
+                <p className="text-sm text-muted-foreground font-medium">Smart Attendance System</p>
               </div>
             </div>
-            <Badge variant="secondary" className="hidden sm:flex">
-              <Shield className="mr-1 h-3 w-3" />
+            <Badge variant="secondary" className="hidden sm:flex items-center gap-2 px-3 py-1.5 text-sm font-medium">
+              <Shield className="h-4 w-4" />
               Secure & Reliable
             </Badge>
           </div>
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8">
-        <div className="grid gap-8 lg:grid-cols-2">
-          {/* Left Column - Features */}
-          <div className="space-y-6">
+      <main className="container mx-auto px-4 py-12">
+        <div className="grid gap-12 lg:grid-cols-2 lg:gap-16">
+          <div className="space-y-8">
             <div className="text-center lg:text-left">
-              <h2 className="text-4xl font-bold tracking-tight text-foreground mb-4">
+              <h2 className="text-5xl font-bold tracking-tight text-foreground mb-6 text-balance">
                 Modern Attendance Tracking for Educational Institutions
               </h2>
-              <p className="text-lg text-muted-foreground mb-6">
+              <p className="text-xl text-muted-foreground mb-8 leading-relaxed text-pretty">
                 Streamline attendance management with QR code technology, real-time analytics, and role-based dashboards
                 for students, lecturers, and administrators.
               </p>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Card className="border-border/50">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center gap-2">
-                    <Scan className="h-5 w-5 text-primary" />
-                    <CardTitle className="text-lg">QR Code Scanning</CardTitle>
+            <div className="grid gap-6 sm:grid-cols-2">
+              <Card className="border-border/50 hover:shadow-lg transition-all duration-300 hover:border-primary/20 group">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                      <Scan className="h-6 w-6 text-primary" />
+                    </div>
+                    <CardTitle className="text-xl font-semibold">QR Code Scanning</CardTitle>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-sm text-muted-foreground">
-                    Quick and contactless attendance marking using smartphone cameras
+                  <p className="text-muted-foreground leading-relaxed">
+                    Quick and contactless attendance marking using smartphone cameras with instant verification
                   </p>
                 </CardContent>
               </Card>
 
-              <Card className="border-border/50">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center gap-2">
-                    <BarChart3 className="h-5 w-5 text-primary" />
-                    <CardTitle className="text-lg">Real-time Analytics</CardTitle>
+              <Card className="border-border/50 hover:shadow-lg transition-all duration-300 hover:border-primary/20 group">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-accent/10 group-hover:bg-accent/20 transition-colors">
+                      <BarChart3 className="h-6 w-6 text-accent" />
+                    </div>
+                    <CardTitle className="text-xl font-semibold">Real-time Analytics</CardTitle>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-sm text-muted-foreground">
-                    Comprehensive attendance reports and performance insights
+                  <p className="text-muted-foreground leading-relaxed">
+                    Comprehensive attendance reports and performance insights with interactive dashboards
                   </p>
                 </CardContent>
               </Card>
 
-              <Card className="border-border/50">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center gap-2">
-                    <Users className="h-5 w-5 text-primary" />
-                    <CardTitle className="text-lg">Role-based Access</CardTitle>
+              <Card className="border-border/50 hover:shadow-lg transition-all duration-300 hover:border-primary/20 group">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                      <Users className="h-6 w-6 text-primary" />
+                    </div>
+                    <CardTitle className="text-xl font-semibold">Role-based Access</CardTitle>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-sm text-muted-foreground">
-                    Customized dashboards for students, lecturers, and administrators
+                  <p className="text-muted-foreground leading-relaxed">
+                    Customized dashboards for students, lecturers, and administrators with secure permissions
                   </p>
                 </CardContent>
               </Card>
 
-              <Card className="border-border/50">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center gap-2">
-                    <BookOpen className="h-5 w-5 text-primary" />
-                    <CardTitle className="text-lg">Course Management</CardTitle>
+              <Card className="border-border/50 hover:shadow-lg transition-all duration-300 hover:border-primary/20 group">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-accent/10 group-hover:bg-accent/20 transition-colors">
+                      <BookOpen className="h-6 w-6 text-accent" />
+                    </div>
+                    <CardTitle className="text-xl font-semibold">Course Management</CardTitle>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-sm text-muted-foreground">
-                    Organize classes, track enrollment, and manage academic sessions
+                  <p className="text-muted-foreground leading-relaxed">
+                    Organize classes, track enrollment, and manage academic sessions with automated workflows
                   </p>
                 </CardContent>
               </Card>
             </div>
           </div>
 
-          {/* Right Column - Auth Forms */}
           <div className="flex items-center justify-center">
-            <Card className="w-full max-w-md">
-              <CardHeader className="text-center">
-                <CardTitle className="text-2xl">Welcome to EduTrack</CardTitle>
-                <CardDescription>Sign in to your account or create a new one to get started</CardDescription>
+            <Card className="w-full max-w-md shadow-xl border-border/50">
+              <CardHeader className="text-center pb-6">
+                <CardTitle className="text-3xl font-bold">Welcome to EduTrack</CardTitle>
+                <CardDescription className="text-base text-muted-foreground leading-relaxed">
+                  Sign in to your account or create a new one to get started with smart attendance tracking
+                </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-6">
                 {error && (
-                  <div className="mb-4 p-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md">
+                  <div className="p-4 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg">
                     {error}
                   </div>
                 )}
 
                 {success && (
-                  <div className="mb-4 p-3 text-sm text-green-600 bg-green-50 border border-green-200 rounded-md">
+                  <div className="p-4 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg">
                     {success}
                   </div>
                 )}
 
                 <Tabs defaultValue="login" className="w-full">
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="login">Sign In</TabsTrigger>
-                    <TabsTrigger value="signup">Sign Up</TabsTrigger>
+                  <TabsList className="grid w-full grid-cols-2 h-12">
+                    <TabsTrigger value="login" className="text-base font-medium">
+                      Sign In
+                    </TabsTrigger>
+                    <TabsTrigger value="signup" className="text-base font-medium">
+                      Sign Up
+                    </TabsTrigger>
                   </TabsList>
 
                   <TabsContent value="login" className="space-y-4">
@@ -357,17 +375,22 @@ export default function EduTrackHome() {
                       </Button>
                     </form>
 
-                    <div className="text-center text-sm text-muted-foreground mt-4 p-3 bg-muted/50 rounded-md">
-                      <p className="font-medium mb-1">Account Types:</p>
-                      <p>
-                        <strong>Student:</strong> Scan QR codes to mark attendance
-                      </p>
-                      <p>
-                        <strong>Lecturer:</strong> Generate QR codes and manage courses (requires admin approval)
-                      </p>
-                      <p>
-                        <strong>Admin:</strong> Full system management and user approval
-                      </p>
+                    <div className="text-center text-sm text-muted-foreground mt-6 p-4 bg-muted/30 rounded-lg border border-border/50">
+                      <p className="font-semibold mb-3 text-foreground">Account Types:</p>
+                      <div className="space-y-2 text-left">
+                        <p className="flex items-start gap-2">
+                          <span className="font-medium text-primary">Student:</span>
+                          <span>Scan QR codes to mark attendance and view records</span>
+                        </p>
+                        <p className="flex items-start gap-2">
+                          <span className="font-medium text-accent">Lecturer:</span>
+                          <span>Generate QR codes and manage courses (requires admin approval)</span>
+                        </p>
+                        <p className="flex items-start gap-2">
+                          <span className="font-medium text-primary">Admin:</span>
+                          <span>Full system management and user approval</span>
+                        </p>
+                      </div>
                     </div>
                   </TabsContent>
                 </Tabs>

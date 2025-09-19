@@ -175,11 +175,30 @@ export const signIn = async (email: string, password: string) => {
   } catch (error: any) {
     console.error("[v0] Signin error:", error)
 
+    if (error.code === "auth/invalid-credential") {
+      throw new Error("Invalid email or password. Please check your credentials and try again.")
+    }
+    if (error.code === "auth/user-not-found") {
+      throw new Error("No account found with this email address. Please sign up first.")
+    }
+    if (error.code === "auth/wrong-password") {
+      throw new Error("Incorrect password. Please try again.")
+    }
+    if (error.code === "auth/too-many-requests") {
+      throw new Error("Too many failed attempts. Please try again later or reset your password.")
+    }
+    if (error.code === "auth/user-disabled") {
+      throw new Error("This account has been disabled. Please contact an administrator.")
+    }
+    if (error.code === "auth/network-request-failed") {
+      throw new Error("Network error. Please check your internet connection and try again.")
+    }
     if (error.message === "Authentication timeout") {
       throw new Error("Sign in is taking too long. Please check your internet connection and try again.")
     }
 
-    throw error
+    // Generic fallback for other errors
+    throw new Error("Sign in failed. Please check your credentials and try again.")
   }
 }
 
@@ -203,13 +222,29 @@ export const getCurrentUser = (): Promise<User | null> => {
 
 export const getUserProfile = async (uid: string): Promise<UserProfile | null> => {
   try {
-    const userDoc = await getDoc(doc(db, "users", uid))
+    console.log("[v0] Fetching user profile for:", uid)
+
+    const userDoc = (await Promise.race([
+      getDoc(doc(db, "users", uid)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Profile fetch timeout")), 8000)),
+    ])) as any
+
     if (userDoc.exists()) {
-      return userDoc.data() as UserProfile
+      const profile = userDoc.data() as UserProfile
+      console.log("[v0] Profile loaded successfully from database")
+      return profile
     }
+
+    console.log("[v0] Profile not found in database")
     return null
-  } catch (error) {
+  } catch (error: any) {
     console.error("[v0] Get user profile error:", error)
+
+    if (error.message?.includes("offline") || error.message?.includes("timeout")) {
+      console.log("[v0] Database unavailable, returning null profile")
+      return null
+    }
+
     return null
   }
 }

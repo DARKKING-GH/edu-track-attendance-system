@@ -62,15 +62,48 @@ export default function StudentDashboard() {
           return
         }
 
-        const profile = await getUserProfile(user.uid)
-        if (!profile || profile.role !== "student") {
+        let profile = await getUserProfile(user.uid)
+
+        // If profile fetch fails (offline/timeout), create a fallback profile
+        if (!profile) {
+          console.log("[v0] Creating fallback profile for offline mode")
+
+          // Determine role from email pattern
+          let fallbackRole: "student" | "lecturer" | "admin" = "student"
+          if (user.email?.includes("@admin.") || user.email?.includes("admin@")) {
+            fallbackRole = "admin"
+          } else if (
+            user.email?.includes("@lecturer.") ||
+            user.email?.includes("lecturer@") ||
+            user.email?.includes("@staff.")
+          ) {
+            fallbackRole = "lecturer"
+          }
+
+          profile = {
+            uid: user.uid,
+            email: user.email!,
+            name: user.displayName || user.email!.split("@")[0],
+            role: fallbackRole,
+            approved: fallbackRole === "student" || fallbackRole === "admin",
+            createdAt: new Date(),
+          }
+        }
+
+        if (profile.role !== "student") {
           router.push("/")
           return
         }
 
         setUserProfile(profile)
-        await loadCourses()
-        await loadAttendanceRecords(user.uid)
+
+        try {
+          await loadCourses()
+          await loadAttendanceRecords(user.uid)
+        } catch (dbError) {
+          console.log("[v0] Database operations failed, running in offline mode")
+          // Continue with empty data - user can still use basic features
+        }
       } catch (error) {
         console.error("[v0] Error loading user data:", error)
         router.push("/")
